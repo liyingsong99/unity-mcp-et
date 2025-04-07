@@ -40,7 +40,7 @@ namespace UnityMCP.Editor.Tools
                         Debug.LogWarning("[ExecuteMenuItem] 'get_available_menus' action is not fully implemented. Dynamically listing all menu items is complex.");
                         // Returning an empty list as per the refactor plan's requirements.
                         return Response.Success("'get_available_menus' action is not fully implemented. Returning empty list.", new List<string>());
-                        // TODO: Consider implementing a basic list of common/known menu items or exploring reflection techniques if this feature becomes critical.
+                    // TODO: Consider implementing a basic list of common/known menu items or exploring reflection techniques if this feature becomes critical.
                     default:
                         return Response.Error($"Unknown action: '{action}'. Valid actions are 'execute', 'get_available_menus'.");
                 }
@@ -82,20 +82,25 @@ namespace UnityMCP.Editor.Tools
             try
             {
                 // Attempt to execute the menu item on the main thread using delayCall for safety.
-                EditorApplication.delayCall += () => {
-                    try {
+                EditorApplication.delayCall += () =>
+                {
+                    try
+                    {
                         bool executed = EditorApplication.ExecuteMenuItem(menuPath);
                         // Log potential failure inside the delayed call.
-                        if (!executed) {
+                        if (!executed)
+                        {
                             Debug.LogError($"[ExecuteMenuItem] Failed to find or execute menu item via delayCall: '{menuPath}'. It might be invalid, disabled, or context-dependent.");
                         }
-                    } catch (Exception delayEx) {
-                         Debug.LogError($"[ExecuteMenuItem] Exception during delayed execution of '{menuPath}': {delayEx}");
+                    }
+                    catch (Exception delayEx)
+                    {
+                        Debug.LogError($"[ExecuteMenuItem] Exception during delayed execution of '{menuPath}': {delayEx}");
                     }
                 };
 
                 // Report attempt immediately, as execution is delayed.
-                 return Response.Success($"Attempted to execute menu item: '{menuPath}'. Check Unity logs for confirmation or errors.");
+                return Response.Success($"Attempted to execute menu item: '{menuPath}'. Check Unity logs for confirmation or errors.");
             }
             catch (Exception e)
             {

@@ -24,7 +24,7 @@ namespace UnityMCP.Editor.Tools
             string name = @params["name"]?.ToString();
             string path = @params["path"]?.ToString(); // Relative to Assets/
             string contents = null;
-            
+
             // Check if we have base64 encoded contents
             bool contentsEncoded = @params["contentsEncoded"]?.ToObject<bool>() ?? false;
             if (contentsEncoded && @params["encodedContents"] != null)
@@ -42,7 +42,7 @@ namespace UnityMCP.Editor.Tools
             {
                 contents = @params["contents"]?.ToString();
             }
-            
+
             string scriptType = @params["scriptType"]?.ToString(); // For templates/validation
             string namespaceName = @params["namespace"]?.ToString(); // For organizing code
 
@@ -61,6 +61,7 @@ namespace UnityMCP.Editor.Tools
                 return Response.Error($"Invalid script name: '{name}'. Use only letters, numbers, underscores, and don't start with a number.");
             }
 
+            //TODO： ET框架的话，需要根据ET框架的目录结构来设置默认目录，这里就自己拓展了
             // Ensure path is relative to Assets/, removing any leading "Assets/"
             // Set default directory to "Scripts" if path is not provided
             string relativeDir = path ?? "Scripts"; // Default to "Scripts" if path is null
@@ -73,8 +74,9 @@ namespace UnityMCP.Editor.Tools
                 }
             }
             // Handle empty string case explicitly after processing
-            if (string.IsNullOrEmpty(relativeDir)) {
-                 relativeDir = "Scripts"; // Ensure default if path was provided as "" or only "/" or "Assets/"
+            if (string.IsNullOrEmpty(relativeDir))
+            {
+                relativeDir = "Scripts"; // Ensure default if path was provided as "" or only "/" or "Assets/"
             }
 
             // Construct paths
@@ -82,7 +84,7 @@ namespace UnityMCP.Editor.Tools
             string fullPathDir = Path.Combine(Application.dataPath, relativeDir); // Application.dataPath ends in "Assets"
             string fullPath = Path.Combine(fullPathDir, scriptFileName);
             string relativePath = Path.Combine("Assets", relativeDir, scriptFileName).Replace('\\', '/'); // Ensure "Assets/" prefix and forward slashes
-            
+
             // Ensure the target directory exists for create/update
             if (action == "create" || action == "update")
             {
@@ -95,7 +97,7 @@ namespace UnityMCP.Editor.Tools
                     return Response.Error($"Could not create directory '{fullPathDir}': {e.Message}");
                 }
             }
-            
+
             // Route to specific action handlers
             switch (action)
             {
@@ -175,17 +177,18 @@ namespace UnityMCP.Editor.Tools
             try
             {
                 string contents = File.ReadAllText(fullPath);
-                
+
                 // Return both normal and encoded contents for larger files
                 bool isLarge = contents.Length > 10000; // If content is large, include encoded version
-                var responseData = new {
-                    path = relativePath, 
+                var responseData = new
+                {
+                    path = relativePath,
                     contents = contents,
                     // For large files, also include base64-encoded version
                     encodedContents = isLarge ? EncodeBase64(contents) : null,
                     contentsEncoded = isLarge
                 };
-                
+
                 return Response.Success($"Script '{Path.GetFileName(relativePath)}' read successfully.", responseData);
             }
             catch (Exception e)
@@ -208,7 +211,7 @@ namespace UnityMCP.Editor.Tools
             // Validate syntax (basic check)
             if (!ValidateScriptSyntax(contents))
             {
-                 Debug.LogWarning($"Potential syntax error in script being updated: {name}");
+                Debug.LogWarning($"Potential syntax error in script being updated: {name}");
                 // Consider if this should be a hard error or just a warning
             }
 
@@ -327,4 +330,4 @@ namespace UnityMCP.Editor.Tools
             // but is complex to implement directly here.
         }
     }
-} 
+}

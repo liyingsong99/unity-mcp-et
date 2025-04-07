@@ -168,7 +168,7 @@ namespace UnityMCP.Editor.Tools
                     .ToList();
 
                 var openWindows = new List<object>();
-                
+
                 // Find currently open instances
                 // Resources.FindObjectsOfTypeAll seems more reliable than GetWindow for finding *all* open windows
                 EditorWindow[] allWindows = Resources.FindObjectsOfTypeAll<EditorWindow>();
@@ -176,10 +176,10 @@ namespace UnityMCP.Editor.Tools
                 foreach (EditorWindow window in allWindows)
                 {
                     if (window == null) continue; // Skip potentially destroyed windows
-                    
+
                     try
                     {
-                         openWindows.Add(new
+                        openWindows.Add(new
                         {
                             title = window.titleContent.text,
                             typeName = window.GetType().FullName,
@@ -202,7 +202,7 @@ namespace UnityMCP.Editor.Tools
             }
         }
 
-         private static object GetActiveTool()
+        private static object GetActiveTool()
         {
             try
             {
@@ -210,8 +210,9 @@ namespace UnityMCP.Editor.Tools
                 string toolName = currentTool.ToString(); // Enum to string
                 bool customToolActive = UnityEditor.Tools.current == Tool.Custom; // Check if a custom tool is active
                 string activeToolName = customToolActive ? EditorTools.GetActiveToolName() : toolName; // Get custom name if needed
-                
-                var toolInfo = new {
+
+                var toolInfo = new
+                {
                     activeTool = activeToolName,
                     isCustom = customToolActive,
                     pivotMode = UnityEditor.Tools.pivotMode.ToString(),
@@ -230,7 +231,7 @@ namespace UnityMCP.Editor.Tools
 
         private static object SetActiveTool(string toolName)
         {
-             try
+            try
             {
                 Tool targetTool;
                 if (Enum.TryParse<Tool>(toolName, true, out targetTool)) // Case-insensitive parse
@@ -242,15 +243,15 @@ namespace UnityMCP.Editor.Tools
                         return Response.Success($"Set active tool to '{targetTool}'.");
                     }
                     else
-                    { 
-                         return Response.Error($"Cannot directly set tool to '{toolName}'. It might be None, Custom, or invalid.");
+                    {
+                        return Response.Error($"Cannot directly set tool to '{toolName}'. It might be None, Custom, or invalid.");
                     }
                 }
                 else
                 {
                     // Potentially try activating a custom tool by name here if needed
                     // This often requires specific editor scripting knowledge for that tool.
-                     return Response.Error($"Could not parse '{toolName}' as a standard Unity Tool (View, Move, Rotate, Scale, Rect, Transform, Custom).");
+                    return Response.Error($"Could not parse '{toolName}' as a standard Unity Tool (View, Move, Rotate, Scale, Rect, Transform, Custom).");
                 }
             }
             catch (Exception e)
@@ -301,7 +302,7 @@ namespace UnityMCP.Editor.Tools
                 // Add the tag using the internal utility
                 InternalEditorUtility.AddTag(tagName);
                 // Force save assets to ensure the change persists in the TagManager asset
-                AssetDatabase.SaveAssets(); 
+                AssetDatabase.SaveAssets();
                 return Response.Success($"Tag '{tagName}' added successfully.");
             }
             catch (Exception e)
@@ -315,7 +316,7 @@ namespace UnityMCP.Editor.Tools
             if (string.IsNullOrWhiteSpace(tagName))
                 return Response.Error("Tag name cannot be empty or whitespace.");
             if (tagName.Equals("Untagged", StringComparison.OrdinalIgnoreCase))
-                 return Response.Error("Cannot remove the built-in 'Untagged' tag.");
+                return Response.Error("Cannot remove the built-in 'Untagged' tag.");
 
             // Check if tag exists before attempting removal
             if (!InternalEditorUtility.tags.Contains(tagName))
@@ -328,7 +329,7 @@ namespace UnityMCP.Editor.Tools
                 // Remove the tag using the internal utility
                 InternalEditorUtility.RemoveTag(tagName);
                 // Force save assets
-                AssetDatabase.SaveAssets(); 
+                AssetDatabase.SaveAssets();
                 return Response.Success($"Tag '{tagName}' removed successfully.");
             }
             catch (Exception e)
@@ -365,7 +366,7 @@ namespace UnityMCP.Editor.Tools
 
             SerializedProperty layersProp = tagManager.FindProperty("layers");
             if (layersProp == null || !layersProp.isArray)
-                 return Response.Error("Could not find 'layers' property in TagManager.");
+                return Response.Error("Could not find 'layers' property in TagManager.");
 
             // Check if layer name already exists (case-insensitive check recommended)
             for (int i = 0; i < TotalLayerCount; i++)
@@ -402,7 +403,7 @@ namespace UnityMCP.Editor.Tools
                 // Apply the changes to the TagManager asset
                 tagManager.ApplyModifiedProperties();
                 // Save assets to make sure it's written to disk
-                AssetDatabase.SaveAssets(); 
+                AssetDatabase.SaveAssets();
                 return Response.Success($"Layer '{layerName}' added successfully to slot {firstEmptyUserLayer}.");
             }
             catch (Exception e)
@@ -418,11 +419,11 @@ namespace UnityMCP.Editor.Tools
 
             // Access the TagManager asset
             SerializedObject tagManager = GetTagManager();
-             if (tagManager == null) return Response.Error("Could not access TagManager asset.");
+            if (tagManager == null) return Response.Error("Could not access TagManager asset.");
 
             SerializedProperty layersProp = tagManager.FindProperty("layers");
-             if (layersProp == null || !layersProp.isArray)
-                 return Response.Error("Could not find 'layers' property in TagManager.");
+            if (layersProp == null || !layersProp.isArray)
+                return Response.Error("Could not find 'layers' property in TagManager.");
 
             // Find the layer by name (must be user layer)
             int layerIndexToRemove = -1;
@@ -450,7 +451,7 @@ namespace UnityMCP.Editor.Tools
                 // Apply the changes
                 tagManager.ApplyModifiedProperties();
                 // Save assets
-                AssetDatabase.SaveAssets(); 
+                AssetDatabase.SaveAssets();
                 return Response.Success($"Layer '{layerName}' (slot {layerIndexToRemove}) removed successfully.");
             }
             catch (Exception e)
@@ -488,23 +489,23 @@ namespace UnityMCP.Editor.Tools
         /// </summary>
         private static SerializedObject GetTagManager()
         {
-             try
-             {
-                 // Load the TagManager asset from the ProjectSettings folder
-                 UnityEngine.Object[] tagManagerAssets = AssetDatabase.LoadAllAssetsAtPath("ProjectSettings/TagManager.asset");
-                 if (tagManagerAssets == null || tagManagerAssets.Length == 0)
-                 {
-                     Debug.LogError("[ManageEditor] TagManager.asset not found in ProjectSettings.");
-                     return null;
-                 }
-                 // The first object in the asset file should be the TagManager
-                 return new SerializedObject(tagManagerAssets[0]);
-             }
-             catch (Exception e)
-             {
-                  Debug.LogError($"[ManageEditor] Error accessing TagManager.asset: {e.Message}");
-                 return null;
-             }
+            try
+            {
+                // Load the TagManager asset from the ProjectSettings folder
+                UnityEngine.Object[] tagManagerAssets = AssetDatabase.LoadAllAssetsAtPath("ProjectSettings/TagManager.asset");
+                if (tagManagerAssets == null || tagManagerAssets.Length == 0)
+                {
+                    Debug.LogError("[ManageEditor] TagManager.asset not found in ProjectSettings.");
+                    return null;
+                }
+                // The first object in the asset file should be the TagManager
+                return new SerializedObject(tagManagerAssets[0]);
+            }
+            catch (Exception e)
+            {
+                Debug.LogError($"[ManageEditor] Error accessing TagManager.asset: {e.Message}");
+                return null;
+            }
         }
 
         // --- Example Implementations for Settings ---
@@ -515,8 +516,10 @@ namespace UnityMCP.Editor.Tools
     }
 
     // Helper class to get custom tool names (remains the same)
-    internal static class EditorTools {
-        public static string GetActiveToolName() {
+    internal static class EditorTools
+    {
+        public static string GetActiveToolName()
+        {
             // This is a placeholder. Real implementation depends on how custom tools 
             // are registered and tracked in the specific Unity project setup.
             // It might involve checking static variables, calling methods on specific tool managers, etc.
@@ -524,9 +527,9 @@ namespace UnityMCP.Editor.Tools
             {
                 // Example: Check a known custom tool manager
                 // if (MyCustomToolManager.IsActive) return MyCustomToolManager.ActiveToolName;
-                return "Unknown Custom Tool"; 
+                return "Unknown Custom Tool";
             }
             return UnityEditor.Tools.current.ToString();
         }
     }
-} 
+}

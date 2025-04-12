@@ -62,7 +62,8 @@ namespace UnityMcpBridge.Editor.Tools
                     $"Invalid script name: '{name}'. Use only letters, numbers, underscores, and don't start with a number."
                 );
             }
-
+			
+			//TODO： ET框架的话，需要根据ET框架的目录结构来设置默认目录，这里就根据自己项目的目录划分，自己拓展了
             // Ensure path is relative to Assets/, removing any leading "Assets/"
             // Set default directory to "Scripts" if path is not provided
             string relativeDir = path ?? "Scripts"; // Default to "Scripts" if path is null

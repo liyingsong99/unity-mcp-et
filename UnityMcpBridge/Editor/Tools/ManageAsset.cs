@@ -1144,6 +1144,15 @@ namespace UnityMcpBridge.Editor.Tools
                 if (type != null)
                     return type;
                 // Add other likely namespaces if needed (e.g., specific plugins)
+				
+                type = assembly.GetType("ET." + typeName, false, true);
+                if (type != null) return type;
+
+                type = assembly.GetType("ET.Client." + typeName, false, true);
+                if (type != null) return type;
+
+                type = assembly.GetType("ET.Server." + typeName, false, true);
+                if (type != null) return type;
             }
 
             Debug.LogWarning($"[FindType] Type '{typeName}' not found in any loaded assembly.");

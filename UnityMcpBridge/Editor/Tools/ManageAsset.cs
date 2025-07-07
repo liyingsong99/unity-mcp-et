@@ -891,6 +891,29 @@ namespace UnityMcpBridge.Editor.Tools
                         );
                     }
                 }
+            } else if (properties["_Color"] is JArray colorArr) //Current Prevention for systems that use _Color instead of color
+            {
+                try {
+                    if (colorArr.Count >= 3)
+                    {
+                        Color newColor = new Color(
+                            colorArr[0].ToObject<float>(),
+                            colorArr[1].ToObject<float>(), 
+                            colorArr[2].ToObject<float>(), 
+                            colorArr.Count > 3 ? colorArr[3].ToObject<float>() : 1.0f
+                        );
+                        if (mat.HasProperty(propName) && mat.GetColor(propName) != newColor)
+                        {
+                            mat.SetColor(propName, newColor);
+                            modified = true;
+                        }
+                    }
+                } 
+                catch (Exception ex) {
+                    Debug.LogWarning(
+                        $"Error parsing color property '{propName}': {ex.Message}"
+                    );
+                }
             }
             // Example: Set float property
             if (properties["float"] is JObject floatProps)

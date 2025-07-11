@@ -1,9 +1,13 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
+using Debug = UnityEngine.Debug;
 using System.IO;
 using System.Linq;
 using System.Net;
+using System.Net.NetworkInformation;
 using System.Net.Sockets;
+using System.Threading;
 using System.Threading.Tasks;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
@@ -72,27 +76,60 @@ namespace UnityMcpBridge.Editor
                 return;
             }
 
-            try
+            // 尝试启动监听器，如果端口被占用则尝试解决
+            const int maxRetries = 3;
+            for (int attempt = 1; attempt <= maxRetries; attempt++)
             {
-                listener = new TcpListener(IPAddress.Loopback, unityPort);
-                listener.Start();
-                isRunning = true;
-                Debug.Log($"UnityMcpBridge started on port {unityPort}.");
-                // Assuming ListenerLoop and ProcessCommands are defined elsewhere
-                Task.Run(ListenerLoop);
-                EditorApplication.update += ProcessCommands;
-            }
-            catch (SocketException ex)
-            {
-                if (ex.SocketErrorCode == SocketError.AddressAlreadyInUse)
+                try
                 {
-                    Debug.LogError(
-                        $"Port {unityPort} is already in use. Ensure no other instances are running or change the port."
-                    );
+                    listener = new TcpListener(IPAddress.Loopback, unityPort);
+                    listener.Start();
+                    isRunning = true;
+                    Debug.Log($"UnityMcpBridge started on port {unityPort} (attempt {attempt}).");
+                    Task.Run(ListenerLoop);
+                    EditorApplication.update += ProcessCommands;
+                    return; // 成功启动，退出重试循环
                 }
-                else
+                catch (SocketException ex)
                 {
-                    Debug.LogError($"Failed to start TCP listener: {ex.Message}");
+                    if (ex.SocketErrorCode == SocketError.AddressAlreadyInUse)
+                    {
+                        Debug.LogWarning($"[尝试 {attempt}/{maxRetries}] 端口 {unityPort} 被占用，正在尝试解除占用...");
+
+                        if (attempt < maxRetries)
+                        {
+                            // 尝试解除端口占用
+                            bool portFreed = TryFreePort(unityPort);
+                            if (portFreed)
+                            {
+                                Debug.Log($"端口 {unityPort} 占用已解除，准备重试启动...");
+                                Thread.Sleep(1000); // 等待1秒让端口完全释放
+                                continue; // 重试启动
+                            }
+                            else
+                            {
+                                Debug.LogWarning($"无法解除端口 {unityPort} 的占用，将在2秒后重试...");
+                                Thread.Sleep(2000); // 等待2秒后重试
+                                continue;
+                            }
+                        }
+                        else
+                        {
+                            Debug.LogError(
+                                $"端口 {unityPort} 持续被占用，已重试 {maxRetries} 次均失败。请手动检查并关闭占用该端口的进程，或重启Unity编辑器。"
+                            );
+                        }
+                    }
+                    else
+                    {
+                        Debug.LogError($"启动TCP监听器失败: {ex.Message}");
+                        break; // 非端口占用错误，不重试
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Debug.LogError($"启动UnityMcpBridge时发生意外错误: {ex.Message}");
+                    break; // 其他异常，不重试
                 }
             }
         }
@@ -189,7 +226,35 @@ namespace UnityMcpBridge.Editor
                             commandQueue[commandId] = (commandText, tcs);
                         }
 
-                        string response = await tcs.Task;
+                        // 设置30秒超时
+                        string response;
+                        var timeoutTask = Task.Delay(30000); // 30秒超时
+                        var completedTask = await Task.WhenAny(tcs.Task, timeoutTask);
+
+                        if (completedTask == timeoutTask)
+                        {
+                            // 超时处理
+                            var timeoutResponse = new
+                            {
+                                status = "error",
+                                error = "Command execution timeout (30 seconds)",
+                                commandText = commandText.Length > 100 ? commandText.Substring(0, 100) + "..." : commandText
+                            };
+                            response = JsonConvert.SerializeObject(timeoutResponse);
+
+                            // 清理超时的命令
+                            lock (lockObj)
+                            {
+                                commandQueue.Remove(commandId);
+                            }
+
+                            Debug.LogWarning($"[UnityMcpBridge] Command timed out after 30 seconds: {commandText.Substring(0, Math.Min(50, commandText.Length))}");
+                        }
+                        else
+                        {
+                            // 正常完成
+                            response = await tcs.Task;
+                        }
                         byte[] responseBytes = System.Text.Encoding.UTF8.GetBytes(response);
                         await stream.WriteAsync(responseBytes, 0, responseBytes.Length);
                     }
@@ -423,7 +488,7 @@ namespace UnityMcpBridge.Editor
                         @params
                             .Properties()
                             .Select(static p =>
-                                $"{p.Name}: {p.Value?.ToString()?[..Math.Min(20, p.Value?.ToString()?.Length ?? 0)]}"
+                                $"{p.Name}: {p.Value?.ToString()?.Substring(0, Math.Min(20, p.Value?.ToString()?.Length ?? 0))}"
                             )
                     );
             }
@@ -431,6 +496,147 @@ namespace UnityMcpBridge.Editor
             {
                 return "Could not summarize parameters";
             }
+        }
+
+        /// <summary>
+        /// 尝试释放被占用的端口，通过终止占用该端口的进程
+        /// </summary>
+        /// <param name="port">要释放的端口号</param>
+        /// <returns>是否成功释放端口</returns>
+        private static bool TryFreePort(int port)
+        {
+            try
+            {
+                Debug.Log($"正在查找占用端口 {port} 的进程...");
+
+                // 获取占用指定端口的进程ID
+                var processIds = GetProcessesUsingPort(port);
+
+                if (processIds.Count == 0)
+                {
+                    Debug.Log($"未找到占用端口 {port} 的进程");
+                    return true; // 端口未被占用，视为成功
+                }
+
+                Debug.Log($"找到 {processIds.Count} 个占用端口 {port} 的进程: {string.Join(", ", processIds)}");
+
+                // 尝试终止这些进程
+                bool allKilled = true;
+                foreach (int processId in processIds)
+                {
+                    try
+                    {
+                        Process process = Process.GetProcessById(processId);
+                        string processName = process.ProcessName;
+
+                        Debug.Log($"正在终止进程: {processName} (PID: {processId})");
+
+                        // 优先尝试优雅关闭
+                        if (!process.CloseMainWindow())
+                        {
+                            // 如果优雅关闭失败，强制终止
+                            process.Kill();
+                        }
+
+                        // 等待进程退出
+                        if (process.WaitForExit(3000)) // 等待3秒
+                        {
+                            Debug.Log($"成功终止进程: {processName} (PID: {processId})");
+                        }
+                        else
+                        {
+                            Debug.LogWarning($"进程 {processName} (PID: {processId}) 未在预期时间内退出");
+                            allKilled = false;
+                        }
+                    }
+                    catch (ArgumentException)
+                    {
+                        Debug.Log($"进程 {processId} 已经不存在");
+                        // 进程已经不存在，这是好事
+                    }
+                    catch (Exception ex)
+                    {
+                        Debug.LogWarning($"终止进程 {processId} 时出错: {ex.Message}");
+                        allKilled = false;
+                    }
+                }
+
+                // 再次检查端口是否已释放
+                Thread.Sleep(500); // 等待500ms让系统清理
+                var remainingProcesses = GetProcessesUsingPort(port);
+                bool portFreed = remainingProcesses.Count == 0;
+
+                if (portFreed)
+                {
+                    Debug.Log($"端口 {port} 已成功释放");
+                }
+                else
+                {
+                    Debug.LogWarning($"端口 {port} 仍被 {remainingProcesses.Count} 个进程占用");
+                }
+
+                return portFreed;
+            }
+            catch (Exception ex)
+            {
+                Debug.LogError($"释放端口 {port} 时发生错误: {ex.Message}");
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// 获取占用指定端口的进程ID列表
+        /// </summary>
+        /// <param name="port">端口号</param>
+        /// <returns>进程ID列表</returns>
+        private static List<int> GetProcessesUsingPort(int port)
+        {
+            var processIds = new List<int>();
+
+            try
+            {
+                // 使用netstat命令查找占用端口的进程
+                var startInfo = new ProcessStartInfo
+                {
+                    FileName = "netstat",
+                    Arguments = "-ano",
+                    UseShellExecute = false,
+                    RedirectStandardOutput = true,
+                    CreateNoWindow = true
+                };
+
+                using (var process = Process.Start(startInfo))
+                {
+                    if (process != null)
+                    {
+                        string output = process.StandardOutput.ReadToEnd();
+                        process.WaitForExit();
+
+                        // 解析netstat输出
+                        var lines = output.Split('\n');
+                        foreach (var line in lines)
+                        {
+                            if (line.Contains($":{port} ") && line.Contains("LISTENING"))
+                            {
+                                var parts = line.Split(new char[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
+                                if (parts.Length >= 5 && int.TryParse(parts[parts.Length - 1], out int pid))
+                                {
+                                    if (!processIds.Contains(pid))
+                                    {
+                                        processIds.Add(pid);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Debug.LogWarning($"查找占用端口 {port} 的进程时出错: {ex.Message}");
+            }
+
+            return processIds;
         }
     }
 }

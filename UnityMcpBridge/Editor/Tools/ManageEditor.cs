@@ -125,6 +125,19 @@ namespace UnityMcpBridge.Editor.Tools
                 case "get_layers":
                     return GetLayers(); // Helper to list current layers
 
+                // Unity资源刷新和编译管理
+                case "refresh_assets":
+                    bool forceRefresh = @params["forceRefresh"]?.ToObject<bool>() ?? false;
+                    return RefreshAssets(forceRefresh);
+                case "save_assets":
+                    return SaveAssets();
+                case "recompile_scripts":
+                    return RecompileScripts();
+                case "full_refresh":
+                    return FullRefresh();
+                case "get_compilation_status":
+                    return GetCompilationStatus();
+
                 // --- Settings (Example) ---
                 // case "set_resolution":
                 //     int? width = @params["width"]?.ToObject<int?>();
@@ -137,7 +150,7 @@ namespace UnityMcpBridge.Editor.Tools
 
                 default:
                     return Response.Error(
-                        $"Unknown action: '{action}'. Supported actions include play, pause, stop, get_state, get_windows, get_active_tool, get_selection, set_active_tool, add_tag, remove_tag, get_tags, add_layer, remove_layer, get_layers."
+                        $"Unknown action: '{action}'. Supported actions include play, pause, stop, get_state, get_windows, get_active_tool, get_selection, set_active_tool, add_tag, remove_tag, get_tags, add_layer, remove_layer, get_layers, refresh_assets, save_assets, recompile_scripts, full_refresh, get_compilation_status."
                     );
             }
         }
@@ -532,6 +545,150 @@ namespace UnityMcpBridge.Editor.Tools
             catch (Exception e)
             {
                 return Response.Error($"Failed to retrieve layers: {e.Message}");
+            }
+        }
+
+        // --- Unity资源刷新和编译管理方法 ---
+
+        /// <summary>
+        /// 刷新Unity资源数据库，使Unity重新扫描和导入资源
+        /// </summary>
+        /// <param name="forceRefresh">是否强制刷新所有资源</param>
+        /// <returns>操作结果</returns>
+        private static object RefreshAssets(bool forceRefresh = false)
+        {
+            try
+            {
+                if (forceRefresh)
+                {
+                    // 强制刷新，使用ImportAssetOptions.ForceUpdate
+                    AssetDatabase.Refresh(ImportAssetOptions.ForceUpdate);
+                    return Response.Success("资源数据库已强制刷新，所有资源已重新导入。");
+                }
+                else
+                {
+                    // 标准刷新
+                    AssetDatabase.Refresh();
+                    return Response.Success("资源数据库已刷新。");
+                }
+            }
+            catch (Exception e)
+            {
+                Debug.LogError($"[ManageEditor.RefreshAssets] 刷新资源时出错: {e}");
+                return Response.Error($"刷新资源失败: {e.Message}");
+            }
+        }
+
+        /// <summary>
+        /// 保存所有已修改的资源到磁盘
+        /// </summary>
+        /// <returns>操作结果</returns>
+        private static object SaveAssets()
+        {
+            try
+            {
+                AssetDatabase.SaveAssets();
+                return Response.Success("所有已修改的资源已保存到磁盘。");
+            }
+            catch (Exception e)
+            {
+                Debug.LogError($"[ManageEditor.SaveAssets] 保存资源时出错: {e}");
+                return Response.Error($"保存资源失败: {e.Message}");
+            }
+        }
+
+        /// <summary>
+        /// 请求重新编译脚本和程序集
+        /// </summary>
+        /// <returns>操作结果</returns>
+        private static object RecompileScripts()
+        {
+            try
+            {
+                if (EditorApplication.isCompiling)
+                {
+                    return Response.Success("Unity当前正在编译中，无需重复请求编译。", new { isCompiling = true });
+                }
+
+                EditorUtility.RequestScriptReload();
+                return Response.Success("已请求重新编译脚本，Unity将开始编译程序集。", new { isCompiling = EditorApplication.isCompiling });
+            }
+            catch (Exception e)
+            {
+                Debug.LogError($"[ManageEditor.RecompileScripts] 重新编译脚本时出错: {e}");
+                return Response.Error($"重新编译脚本失败: {e.Message}");
+            }
+        }
+
+        /// <summary>
+        /// 执行完整的刷新流程：保存资源、刷新资源数据库、重新编译脚本
+        /// </summary>
+        /// <returns>操作结果</returns>
+        private static object FullRefresh()
+        {
+            try
+            {
+                // 1. 保存所有修改的资源
+                AssetDatabase.SaveAssets();
+                Debug.Log("[ManageEditor.FullRefresh] 步骤1: 已保存所有修改的资源");
+
+                // 2. 刷新资源数据库
+                AssetDatabase.Refresh();
+                Debug.Log("[ManageEditor.FullRefresh] 步骤2: 已刷新资源数据库");
+
+                // 3. 请求重新编译（如果当前没在编译）
+                if (!EditorApplication.isCompiling)
+                {
+                    EditorUtility.RequestScriptReload();
+                    Debug.Log("[ManageEditor.FullRefresh] 步骤3: 已请求重新编译脚本");
+                }
+                else
+                {
+                    Debug.Log("[ManageEditor.FullRefresh] 步骤3: Unity当前正在编译，跳过重新编译请求");
+                }
+
+                return Response.Success("完整刷新已执行：已保存资源、刷新数据库并请求重新编译。", new
+                {
+                    savedAssets = true,
+                    refreshedDatabase = true,
+                    requestedRecompile = !EditorApplication.isCompiling,
+                    isCompiling = EditorApplication.isCompiling
+                });
+            }
+            catch (Exception e)
+            {
+                Debug.LogError($"[ManageEditor.FullRefresh] 执行完整刷新时出错: {e}");
+                return Response.Error($"完整刷新失败: {e.Message}");
+            }
+        }
+
+        /// <summary>
+        /// 获取当前编译状态信息
+        /// </summary>
+        /// <returns>编译状态信息</returns>
+        private static object GetCompilationStatus()
+        {
+            try
+            {
+                var compilationStatus = new
+                {
+                    isCompiling = EditorApplication.isCompiling,
+                    isUpdating = EditorApplication.isUpdating,
+                    timeSinceStartup = EditorApplication.timeSinceStartup,
+                    // 添加编译相关的详细状态
+                    canRecompile = !EditorApplication.isCompiling && !EditorApplication.isUpdating
+                };
+
+                string statusMessage = EditorApplication.isCompiling ? "Unity正在编译中" :
+                                     EditorApplication.isUpdating ? "Unity正在更新中" :
+                                     "Unity处于空闲状态，可以执行编译操作";
+
+                return Response.Success(statusMessage, compilationStatus);
+            }
+            catch (Exception e)
+            {
+                Debug.LogError($"[ManageEditor.GetCompilationStatus] 获取编译状态时出错: {e}");
+                return Response.Error($"获取编译状态失败: {e.Message}");
             }
         }
 

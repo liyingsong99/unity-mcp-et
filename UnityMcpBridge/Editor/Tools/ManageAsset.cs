@@ -891,27 +891,30 @@ namespace UnityMcpBridge.Editor.Tools
                         );
                     }
                 }
-            } else if (properties["_Color"] is JArray colorArr) //Current Prevention for systems that use _Color instead of color
+            }
+            else if (properties["_Color"] is JArray colorArr) //Current Prevention for systems that use _Color instead of color
             {
-                try {
+                try
+                {
                     if (colorArr.Count >= 3)
                     {
                         Color newColor = new Color(
                             colorArr[0].ToObject<float>(),
-                            colorArr[1].ToObject<float>(), 
-                            colorArr[2].ToObject<float>(), 
+                            colorArr[1].ToObject<float>(),
+                            colorArr[2].ToObject<float>(),
                             colorArr.Count > 3 ? colorArr[3].ToObject<float>() : 1.0f
                         );
-                        if (mat.HasProperty(propName) && mat.GetColor(propName) != newColor)
+                        if (mat.HasProperty("_Color") && mat.GetColor("_Color") != newColor)
                         {
-                            mat.SetColor(propName, newColor);
+                            mat.SetColor("_Color", newColor);
                             modified = true;
                         }
                     }
-                } 
-                catch (Exception ex) {
+                }
+                catch (Exception ex)
+                {
                     Debug.LogWarning(
-                        $"Error parsing color property '{propName}': {ex.Message}"
+                        $"Error parsing color property '_Color': {ex.Message}"
                     );
                 }
             }
@@ -1167,7 +1170,7 @@ namespace UnityMcpBridge.Editor.Tools
                 if (type != null)
                     return type;
                 // Add other likely namespaces if needed (e.g., specific plugins)
-				
+
                 type = assembly.GetType("ET." + typeName, false, true);
                 if (type != null) return type;
 

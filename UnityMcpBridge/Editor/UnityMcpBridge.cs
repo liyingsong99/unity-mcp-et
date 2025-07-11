@@ -108,21 +108,21 @@ namespace UnityMcpBridge.Editor
                 {
                     if (ex.SocketErrorCode == SocketError.AddressAlreadyInUse)
                     {
-                        Debug.LogWarning($"[尝试 {attempt}/{maxRetries}] 端口 {unityPort} 被占用，正在尝试解除占用...");
+                        Debug.LogWarning($"[尝试 {attempt}/{maxRetries}] 端口 {unityPort} 被占用，正在检查占用情况...");
 
                         if (attempt < maxRetries)
                         {
-                            // 尝试解除端口占用
-                            bool portFreed = TryFreePort(unityPort);
-                            if (portFreed)
+                            // 检查端口占用情况（不再尝试终止进程）
+                            bool portAvailable = TryFreePort(unityPort);
+                            if (portAvailable)
                             {
-                                Debug.Log($"端口 {unityPort} 占用已解除，准备重试启动...");
-                                Thread.Sleep(1000); // 等待1秒让端口完全释放
+                                Debug.Log($"端口 {unityPort} 检查完成，准备重试启动...");
+                                Thread.Sleep(1000); // 等待1秒让端口状态稳定
                                 continue; // 重试启动
                             }
                             else
                             {
-                                Debug.LogWarning($"无法解除端口 {unityPort} 的占用，将在2秒后重试...");
+                                Debug.LogWarning($"端口 {unityPort} 仍被占用，请手动处理后重试，将在2秒后重试...");
                                 Thread.Sleep(2000); // 等待2秒后重试
                                 continue;
                             }
@@ -200,7 +200,7 @@ namespace UnityMcpBridge.Editor
         }
 
         /// <summary>
-        /// 清理残留的资源（PID文件和端口占用）
+        /// 清理残留的资源（PID文件和端口占用检查）
         /// </summary>
         private static void CleanupResidualResources()
         {
@@ -219,8 +219,8 @@ namespace UnityMcpBridge.Editor
                             // 检查该PID是否仍在运行且占用我们的端口
                             if (IsProcessRunningAndUsingPort(oldPid, unityPort))
                             {
-                                Debug.Log($"发现残留进程 {oldPid} 仍在占用端口 {unityPort}，尝试终止...");
-                                TryKillProcess(oldPid);
+                                Debug.LogWarning($"发现残留进程 {oldPid} 仍在占用端口 {unityPort}，请手动处理");
+                                TryKillProcess(oldPid); // 调用已弃用的方法，仅用于记录信息
                             }
                         }
                     }
@@ -233,14 +233,14 @@ namespace UnityMcpBridge.Editor
                     File.Delete(pidFilePath);
                 }
 
-                // 额外的端口清理检查
+                // 额外的端口占用检查
                 var processIds = GetProcessesUsingPort(unityPort);
                 if (processIds.Count > 0)
                 {
-                    Debug.Log($"发现 {processIds.Count} 个进程占用端口 {unityPort}，尝试清理...");
+                    Debug.LogWarning($"发现 {processIds.Count} 个进程占用端口 {unityPort}，请手动处理");
                     foreach (int pid in processIds)
                     {
-                        TryKillProcess(pid);
+                        TryKillProcess(pid); // 调用已弃用的方法，仅用于记录信息
                     }
                 }
             }
@@ -268,8 +268,9 @@ namespace UnityMcpBridge.Editor
         }
 
         /// <summary>
-        /// 尝试终止指定进程
+        /// 已弃用：为了系统安全，不再支持进程终止功能
         /// </summary>
+        [System.Obsolete("进程终止功能已被禁用以确保系统安全，请手动管理进程")]
         private static void TryKillProcess(int pid)
         {
             try
@@ -277,23 +278,8 @@ namespace UnityMcpBridge.Editor
                 Process process = Process.GetProcessById(pid);
                 string processName = process.ProcessName;
 
-                Debug.Log($"正在终止进程: {processName} (PID: {pid})");
-
-                // 优先尝试优雅关闭
-                if (!process.CloseMainWindow())
-                {
-                    // 如果优雅关闭失败，强制终止
-                    process.Kill();
-                }
-
-                if (process.WaitForExit(3000))
-                {
-                    Debug.Log($"成功终止进程: {processName} (PID: {pid})");
-                }
-                else
-                {
-                    Debug.LogWarning($"进程 {processName} (PID: {pid}) 未在预期时间内退出");
-                }
+                Debug.LogWarning($"检测到进程: {processName} (PID: {pid})，但进程终止功能已被禁用以确保系统安全");
+                Debug.LogWarning($"如需终止进程 {processName} (PID: {pid})，请手动处理");
             }
             catch (ArgumentException)
             {
@@ -301,7 +287,7 @@ namespace UnityMcpBridge.Editor
             }
             catch (Exception ex)
             {
-                Debug.LogWarning($"终止进程 {pid} 时出错: {ex.Message}");
+                Debug.LogWarning($"获取进程 {pid} 信息时出错: {ex.Message}");
             }
         }
 
@@ -733,87 +719,52 @@ namespace UnityMcpBridge.Editor
         }
 
         /// <summary>
-        /// 尝试释放被占用的端口，通过终止占用该端口的进程
+        /// 检查指定端口的占用情况，不再尝试终止占用进程以确保系统安全
         /// </summary>
-        /// <param name="port">要释放的端口号</param>
-        /// <returns>是否成功释放端口</returns>
+        /// <param name="port">要检查的端口号</param>
+        /// <returns>端口是否可用（未被占用）</returns>
         private static bool TryFreePort(int port)
         {
             try
             {
-                Debug.Log($"正在查找占用端口 {port} 的进程...");
+                Debug.Log($"正在检查端口 {port} 的占用情况...");
 
                 // 获取占用指定端口的进程ID
                 var processIds = GetProcessesUsingPort(port);
 
                 if (processIds.Count == 0)
                 {
-                    Debug.Log($"未找到占用端口 {port} 的进程");
-                    return true; // 端口未被占用，视为成功
+                    Debug.Log($"端口 {port} 未被占用，可以正常使用");
+                    return true; // 端口未被占用
                 }
 
-                Debug.Log($"找到 {processIds.Count} 个占用端口 {port} 的进程: {string.Join(", ", processIds)}");
+                Debug.LogWarning($"检测到端口 {port} 被 {processIds.Count} 个进程占用");
 
-                // 尝试终止这些进程
-                bool allKilled = true;
+                // 详细报告占用进程信息，但不尝试终止
                 foreach (int processId in processIds)
                 {
                     try
                     {
                         Process process = Process.GetProcessById(processId);
                         string processName = process.ProcessName;
-
-                        Debug.Log($"正在终止进程: {processName} (PID: {processId})");
-
-                        // 优先尝试优雅关闭
-                        if (!process.CloseMainWindow())
-                        {
-                            // 如果优雅关闭失败，强制终止
-                            process.Kill();
-                        }
-
-                        // 等待进程退出
-                        if (process.WaitForExit(3000)) // 等待3秒
-                        {
-                            Debug.Log($"成功终止进程: {processName} (PID: {processId})");
-                        }
-                        else
-                        {
-                            Debug.LogWarning($"进程 {processName} (PID: {processId}) 未在预期时间内退出");
-                            allKilled = false;
-                        }
+                        Debug.LogWarning($"端口 {port} 被进程占用: {processName} (PID: {processId})");
                     }
                     catch (ArgumentException)
                     {
                         Debug.Log($"进程 {processId} 已经不存在");
-                        // 进程已经不存在，这是好事
                     }
                     catch (Exception ex)
                     {
-                        Debug.LogWarning($"终止进程 {processId} 时出错: {ex.Message}");
-                        allKilled = false;
+                        Debug.LogWarning($"获取进程 {processId} 信息时出错: {ex.Message}");
                     }
                 }
 
-                // 再次检查端口是否已释放
-                Thread.Sleep(500); // 等待500ms让系统清理
-                var remainingProcesses = GetProcessesUsingPort(port);
-                bool portFreed = remainingProcesses.Count == 0;
-
-                if (portFreed)
-                {
-                    Debug.Log($"端口 {port} 已成功释放");
-                }
-                else
-                {
-                    Debug.LogWarning($"端口 {port} 仍被 {remainingProcesses.Count} 个进程占用");
-                }
-
-                return portFreed;
+                Debug.LogWarning($"端口 {port} 被占用，请手动关闭占用该端口的进程，或使用其他端口");
+                return false; // 端口被占用
             }
             catch (Exception ex)
             {
-                Debug.LogError($"释放端口 {port} 时发生错误: {ex.Message}");
+                Debug.LogError($"检查端口 {port} 时发生错误: {ex.Message}");
                 return false;
             }
         }

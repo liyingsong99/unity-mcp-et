@@ -77,7 +77,7 @@ Unity MCP connects your tools using two components:
 4. Enter:
 
     ```
-    https://github.com/liyingsong99/unity-mcp-et.git
+    https://github.com/liyingsong99/unity-mcp-et.git?path=/UnityMcpBridge
     ```
 
 5. Click `Add`.

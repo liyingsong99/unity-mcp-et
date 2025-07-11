@@ -30,6 +30,9 @@ namespace UnityMcpBridge.Editor
             (string commandJson, TaskCompletionSource<string> tcs)
         > commandQueue = new();
         private static readonly int unityPort = 6400; // Hardcoded port
+        private static readonly List<TcpClient> activeClients = new(); // 追踪活跃连接
+        private static readonly string pidFilePath = Path.Combine(Application.temporaryCachePath, "unity_mcp_bridge.pid"); // PID文件路径
+        private static volatile bool isShuttingDown = false; // 关闭状态标志
 
         public static bool IsRunning => isRunning;
 
@@ -54,8 +57,15 @@ namespace UnityMcpBridge.Editor
 
         static UnityMcpBridge()
         {
-            Start();
+            // 注册多重退出事件处理，确保在各种情况下都能清理资源
             EditorApplication.quitting += Stop;
+            AppDomain.CurrentDomain.ProcessExit += OnProcessExit;
+            AppDomain.CurrentDomain.DomainUnload += OnDomainUnload;
+
+            // 清理可能残留的PID文件和端口占用
+            CleanupResidualResources();
+
+            Start();
         }
 
         public static void Start()
@@ -85,6 +95,10 @@ namespace UnityMcpBridge.Editor
                     listener = new TcpListener(IPAddress.Loopback, unityPort);
                     listener.Start();
                     isRunning = true;
+
+                    // 创建并写入PID文件，用于追踪进程
+                    CreatePidFile();
+
                     Debug.Log($"UnityMcpBridge started on port {unityPort} (attempt {attempt}).");
                     Task.Run(ListenerLoop);
                     EditorApplication.update += ProcessCommands;
@@ -141,17 +155,214 @@ namespace UnityMcpBridge.Editor
                 return;
             }
 
+            isShuttingDown = true;
+
             try
             {
+                // 强制关闭所有活跃连接
+                CloseAllActiveConnections();
+
+                // 停止监听器
                 listener?.Stop();
                 listener = null;
                 isRunning = false;
                 EditorApplication.update -= ProcessCommands;
-                Debug.Log("UnityMcpBridge stopped.");
+
+                // 清理PID文件
+                CleanupPidFile();
+
+                Debug.Log("UnityMcpBridge stopped and all resources cleaned up.");
             }
             catch (Exception ex)
             {
                 Debug.LogError($"Error stopping UnityMcpBridge: {ex.Message}");
+            }
+            finally
+            {
+                isShuttingDown = false;
+            }
+        }
+
+        /// <summary>
+        /// 处理进程退出事件
+        /// </summary>
+        private static void OnProcessExit(object sender, EventArgs e)
+        {
+            Stop();
+        }
+
+        /// <summary>
+        /// 处理应用程序域卸载事件
+        /// </summary>
+        private static void OnDomainUnload(object sender, EventArgs e)
+        {
+            Stop();
+        }
+
+        /// <summary>
+        /// 清理残留的资源（PID文件和端口占用）
+        /// </summary>
+        private static void CleanupResidualResources()
+        {
+            try
+            {
+                // 检查并清理PID文件
+                if (File.Exists(pidFilePath))
+                {
+                    Debug.Log("发现残留的PID文件，正在清理...");
+
+                    try
+                    {
+                        string pidContent = File.ReadAllText(pidFilePath);
+                        if (int.TryParse(pidContent, out int oldPid))
+                        {
+                            // 检查该PID是否仍在运行且占用我们的端口
+                            if (IsProcessRunningAndUsingPort(oldPid, unityPort))
+                            {
+                                Debug.Log($"发现残留进程 {oldPid} 仍在占用端口 {unityPort}，尝试终止...");
+                                TryKillProcess(oldPid);
+                            }
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        Debug.LogWarning($"读取PID文件时出错: {ex.Message}");
+                    }
+
+                    // 删除PID文件
+                    File.Delete(pidFilePath);
+                }
+
+                // 额外的端口清理检查
+                var processIds = GetProcessesUsingPort(unityPort);
+                if (processIds.Count > 0)
+                {
+                    Debug.Log($"发现 {processIds.Count} 个进程占用端口 {unityPort}，尝试清理...");
+                    foreach (int pid in processIds)
+                    {
+                        TryKillProcess(pid);
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Debug.LogWarning($"清理残留资源时出错: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// 检查指定进程是否正在运行并占用指定端口
+        /// </summary>
+        private static bool IsProcessRunningAndUsingPort(int pid, int port)
+        {
+            try
+            {
+                Process.GetProcessById(pid); // 如果进程不存在会抛出异常
+                var processIds = GetProcessesUsingPort(port);
+                return processIds.Contains(pid);
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// 尝试终止指定进程
+        /// </summary>
+        private static void TryKillProcess(int pid)
+        {
+            try
+            {
+                Process process = Process.GetProcessById(pid);
+                string processName = process.ProcessName;
+
+                Debug.Log($"正在终止进程: {processName} (PID: {pid})");
+
+                // 优先尝试优雅关闭
+                if (!process.CloseMainWindow())
+                {
+                    // 如果优雅关闭失败，强制终止
+                    process.Kill();
+                }
+
+                if (process.WaitForExit(3000))
+                {
+                    Debug.Log($"成功终止进程: {processName} (PID: {pid})");
+                }
+                else
+                {
+                    Debug.LogWarning($"进程 {processName} (PID: {pid}) 未在预期时间内退出");
+                }
+            }
+            catch (ArgumentException)
+            {
+                Debug.Log($"进程 {pid} 已经不存在");
+            }
+            catch (Exception ex)
+            {
+                Debug.LogWarning($"终止进程 {pid} 时出错: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// 关闭所有活跃连接
+        /// </summary>
+        private static void CloseAllActiveConnections()
+        {
+            lock (lockObj)
+            {
+                Debug.Log($"正在关闭 {activeClients.Count} 个活跃连接...");
+
+                foreach (var client in activeClients.ToList())
+                {
+                    try
+                    {
+                        client?.Close();
+                        client?.Dispose();
+                    }
+                    catch (Exception ex)
+                    {
+                        Debug.LogWarning($"关闭客户端连接时出错: {ex.Message}");
+                    }
+                }
+                activeClients.Clear();
+            }
+        }
+
+        /// <summary>
+        /// 创建PID文件记录当前进程
+        /// </summary>
+        private static void CreatePidFile()
+        {
+            try
+            {
+                int currentPid = Process.GetCurrentProcess().Id;
+                File.WriteAllText(pidFilePath, currentPid.ToString());
+                Debug.Log($"已创建PID文件: {pidFilePath}, PID: {currentPid}");
+            }
+            catch (Exception ex)
+            {
+                Debug.LogWarning($"创建PID文件时出错: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// 清理PID文件
+        /// </summary>
+        private static void CleanupPidFile()
+        {
+            try
+            {
+                if (File.Exists(pidFilePath))
+                {
+                    File.Delete(pidFilePath);
+                    Debug.Log("PID文件已清理");
+                }
+            }
+            catch (Exception ex)
+            {
+                Debug.LogWarning($"清理PID文件时出错: {ex.Message}");
             }
         }
 
@@ -161,7 +372,19 @@ namespace UnityMcpBridge.Editor
             {
                 try
                 {
+                    if (isShuttingDown)
+                    {
+                        break;
+                    }
+
                     TcpClient client = await listener.AcceptTcpClientAsync();
+
+                    // 将客户端添加到活跃连接列表中进行追踪
+                    lock (lockObj)
+                    {
+                        activeClients.Add(client);
+                    }
+
                     // Enable basic socket keepalive
                     client.Client.SetSocketOption(
                         SocketOptionLevel.Socket,
@@ -187,82 +410,93 @@ namespace UnityMcpBridge.Editor
 
         private static async Task HandleClientAsync(TcpClient client)
         {
-            using (client)
-            using (NetworkStream stream = client.GetStream())
+            try
             {
-                byte[] buffer = new byte[8192];
-                while (isRunning)
+                using (client)
+                using (NetworkStream stream = client.GetStream())
                 {
-                    try
+                    byte[] buffer = new byte[8192];
+                    while (isRunning && !isShuttingDown)
                     {
-                        int bytesRead = await stream.ReadAsync(buffer, 0, buffer.Length);
-                        if (bytesRead == 0)
+                        try
                         {
-                            break; // Client disconnected
-                        }
-
-                        string commandText = System.Text.Encoding.UTF8.GetString(
-                            buffer,
-                            0,
-                            bytesRead
-                        );
-                        string commandId = Guid.NewGuid().ToString();
-                        TaskCompletionSource<string> tcs = new();
-
-                        // Special handling for ping command to avoid JSON parsing
-                        if (commandText.Trim() == "ping")
-                        {
-                            // Direct response to ping without going through JSON parsing
-                            byte[] pingResponseBytes = System.Text.Encoding.UTF8.GetBytes(
-                                /*lang=json,strict*/
-                                "{\"status\":\"success\",\"result\":{\"message\":\"pong\"}}"
-                            );
-                            await stream.WriteAsync(pingResponseBytes, 0, pingResponseBytes.Length);
-                            continue;
-                        }
-
-                        lock (lockObj)
-                        {
-                            commandQueue[commandId] = (commandText, tcs);
-                        }
-
-                        // 设置30秒超时
-                        string response;
-                        var timeoutTask = Task.Delay(30000); // 30秒超时
-                        var completedTask = await Task.WhenAny(tcs.Task, timeoutTask);
-
-                        if (completedTask == timeoutTask)
-                        {
-                            // 超时处理
-                            var timeoutResponse = new
+                            int bytesRead = await stream.ReadAsync(buffer, 0, buffer.Length);
+                            if (bytesRead == 0)
                             {
-                                status = "error",
-                                error = "Command execution timeout (30 seconds)",
-                                commandText = commandText.Length > 100 ? commandText.Substring(0, 100) + "..." : commandText
-                            };
-                            response = JsonConvert.SerializeObject(timeoutResponse);
-
-                            // 清理超时的命令
-                            lock (lockObj)
-                            {
-                                commandQueue.Remove(commandId);
+                                break; // Client disconnected
                             }
 
-                            Debug.LogWarning($"[UnityMcpBridge] Command timed out after 30 seconds: {commandText.Substring(0, Math.Min(50, commandText.Length))}");
+                            string commandText = System.Text.Encoding.UTF8.GetString(
+                                buffer,
+                                0,
+                                bytesRead
+                            );
+                            string commandId = Guid.NewGuid().ToString();
+                            TaskCompletionSource<string> tcs = new();
+
+                            // Special handling for ping command to avoid JSON parsing
+                            if (commandText.Trim() == "ping")
+                            {
+                                // Direct response to ping without going through JSON parsing
+                                byte[] pingResponseBytes = System.Text.Encoding.UTF8.GetBytes(
+                                    /*lang=json,strict*/
+                                    "{\"status\":\"success\",\"result\":{\"message\":\"pong\"}}"
+                                );
+                                await stream.WriteAsync(pingResponseBytes, 0, pingResponseBytes.Length);
+                                continue;
+                            }
+
+                            lock (lockObj)
+                            {
+                                commandQueue[commandId] = (commandText, tcs);
+                            }
+
+                            // 设置30秒超时
+                            string response;
+                            var timeoutTask = Task.Delay(30000); // 30秒超时
+                            var completedTask = await Task.WhenAny(tcs.Task, timeoutTask);
+
+                            if (completedTask == timeoutTask)
+                            {
+                                // 超时处理
+                                var timeoutResponse = new
+                                {
+                                    status = "error",
+                                    error = "Command execution timeout (30 seconds)",
+                                    commandText = commandText.Length > 100 ? commandText.Substring(0, 100) + "..." : commandText
+                                };
+                                response = JsonConvert.SerializeObject(timeoutResponse);
+
+                                // 清理超时的命令
+                                lock (lockObj)
+                                {
+                                    commandQueue.Remove(commandId);
+                                }
+
+                                Debug.LogWarning($"[UnityMcpBridge] Command timed out after 30 seconds: {commandText.Substring(0, Math.Min(50, commandText.Length))}");
+                            }
+                            else
+                            {
+                                // 正常完成
+                                response = await tcs.Task;
+                            }
+                            byte[] responseBytes = System.Text.Encoding.UTF8.GetBytes(response);
+                            await stream.WriteAsync(responseBytes, 0, responseBytes.Length);
                         }
-                        else
+                        catch (Exception ex)
                         {
-                            // 正常完成
-                            response = await tcs.Task;
+                            Debug.LogError($"Client handler error: {ex.Message}");
+                            break;
                         }
-                        byte[] responseBytes = System.Text.Encoding.UTF8.GetBytes(response);
-                        await stream.WriteAsync(responseBytes, 0, responseBytes.Length);
                     }
-                    catch (Exception ex)
-                    {
-                        Debug.LogError($"Client handler error: {ex.Message}");
-                        break;
-                    }
+                }
+            }
+            finally
+            {
+                // 从活跃连接列表中移除客户端
+                lock (lockObj)
+                {
+                    activeClients.Remove(client);
                 }
             }
         }

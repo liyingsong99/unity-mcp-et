@@ -10,13 +10,13 @@ namespace UnityMcpBridge.Editor.Helpers
     public static class ServerInstaller
     {
         private const string RootFolder = "UnityMCP";
-        private const string ServerFolder = "UnityMcpServer";
+        private const string ServerFolder = "UnityMcpServer~";
         private const string BranchName = "master";
-        private const string GitUrl = "https://github.com/justinpbarnett/unity-mcp.git";
+        private const string GitUrl = "https://github.com/liyingsong99/unity-mcp-et.git";
         private const string PyprojectUrl =
             "https://raw.githubusercontent.com/justinpbarnett/unity-mcp/refs/heads/"
             + BranchName
-            + "/UnityMcpServer/src/pyproject.toml";
+            + "/UnityMcpServer~/src/pyproject.toml";
 
         /// <summary>
         /// Ensures the unity-mcp-server is installed and up to date.
@@ -131,7 +131,7 @@ namespace UnityMcpBridge.Editor.Helpers
             // Configure sparse checkout
             RunCommand("git", "config core.sparseCheckout true", workingDirectory: location);
 
-            // Set sparse checkout path to only include UnityMcpServer folder
+            // Set sparse checkout path to only include UnityMcpServer~ folder
             string sparseCheckoutPath = Path.Combine(location, ".git", "info", "sparse-checkout");
             File.WriteAllText(sparseCheckoutPath, $"{ServerFolder}/");
 
@@ -165,7 +165,7 @@ namespace UnityMcpBridge.Editor.Helpers
         }
 
         /// <summary>
-        /// Updates the server by pulling the latest changes for the UnityMcpServer folder only.
+        /// Updates the server by pulling the latest changes for the UnityMcpServer~ folder only.
         /// </summary>
         private static void UpdateServer(string location)
         {

@@ -31,3 +31,6 @@ CONTRIBUTING.md.meta
 .idea/
 .vscode/
 .aider*
+
+obj/
+bin/

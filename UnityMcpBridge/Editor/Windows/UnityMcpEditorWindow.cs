@@ -1,12 +1,14 @@
 using System;
 using System.IO;
 using System.Runtime.InteropServices;
+using System.Threading.Tasks;
 using Newtonsoft.Json;
 using UnityEditor;
 using UnityEngine;
 using UnityMcpBridge.Editor.Data;
 using UnityMcpBridge.Editor.Helpers;
 using UnityMcpBridge.Editor.Models;
+using UnityMcpBridge.Editor.Services;
 
 namespace UnityMcpBridge.Editor.Windows
 {
@@ -20,6 +22,11 @@ namespace UnityMcpBridge.Editor.Windows
         private const int mcpPort = 6500; // Hardcoded MCP port
         private readonly McpClients mcpClients = new();
 
+        // 服务器管理相关
+        private ServerManagementConfig serverConfig;
+        private ServerStatusInfo currentServerStatus;
+        private bool isConsoleManagerRunning = false;
+
         [MenuItem("Window/Unity MCP")]
         public static void ShowWindow()
         {
@@ -29,6 +36,7 @@ namespace UnityMcpBridge.Editor.Windows
         private void OnEnable()
         {
             UpdatePythonServerInstallationStatus();
+            UpdateServerStatus();
 
             isUnityBridgeRunning = UnityMcpBridge.IsRunning;
             foreach (McpClient mcpClient in mcpClients.clients)
@@ -235,6 +243,65 @@ namespace UnityMcpBridge.Editor.Windows
                 "Your MCP client (e.g. Cursor or Claude Desktop) will start the server automatically when you start it.",
                 MessageType.Info
             );
+            EditorGUILayout.EndVertical();
+
+            EditorGUILayout.Space(10);
+
+            // Server Management Section
+            EditorGUILayout.BeginVertical(EditorStyles.helpBox);
+            EditorGUILayout.LabelField("Server Management", EditorStyles.boldLabel);
+
+            // 服务器启动方式选择
+            EditorGUILayout.BeginHorizontal();
+            EditorGUILayout.LabelField("Startup Mode:", GUILayout.Width(100));
+            var newStartupMode = (ServerStartupMode)EditorGUILayout.EnumPopup(serverConfig.startupMode, GUILayout.Width(150));
+            if (newStartupMode != serverConfig.startupMode)
+            {
+                serverConfig.startupMode = newStartupMode;
+                ServerManagementSettings.SaveConfig(serverConfig);
+            }
+            EditorGUILayout.EndHorizontal();
+
+            // 控制台管理器状态
+            EditorGUILayout.BeginHorizontal();
+            EditorGUILayout.LabelField("Console Manager:", GUILayout.Width(100));
+            Color consoleManagerColor = isConsoleManagerRunning ? Color.green : Color.red;
+            DrawStatusDot(EditorGUILayout.GetControlRect(false, 20), consoleManagerColor);
+            EditorGUILayout.LabelField($"      {(isConsoleManagerRunning ? "Running" : "Stopped")}");
+            EditorGUILayout.EndHorizontal();
+
+            // 服务器状态
+            if (currentServerStatus != null)
+            {
+                EditorGUILayout.BeginHorizontal();
+                EditorGUILayout.LabelField("Server Status:", GUILayout.Width(100));
+                Color serverColor = currentServerStatus.isHealthy ? Color.green : Color.yellow;
+                DrawStatusDot(EditorGUILayout.GetControlRect(false, 20), serverColor);
+                EditorGUILayout.LabelField($"      {(currentServerStatus.isRunning ? "Running" : "Stopped")}");
+                EditorGUILayout.EndHorizontal();
+
+                if (currentServerStatus.unityPort > 0)
+                {
+                    EditorGUILayout.LabelField($"Unity Port: {currentServerStatus.unityPort}");
+                }
+                if (currentServerStatus.mcpPort > 0)
+                {
+                    EditorGUILayout.LabelField($"MCP Port: {currentServerStatus.mcpPort}");
+                }
+            }
+
+            // 控制按钮
+            EditorGUILayout.BeginHorizontal();
+            if (GUILayout.Button("Start Console Manager", GUILayout.Width(150)))
+            {
+                _ = StartConsoleManagerAsync();
+            }
+            if (GUILayout.Button("Stop Console Manager", GUILayout.Width(150)))
+            {
+                _ = StopConsoleManagerAsync();
+            }
+            EditorGUILayout.EndHorizontal();
+
             EditorGUILayout.EndVertical();
 
             EditorGUILayout.Space(10);
@@ -570,6 +637,79 @@ namespace UnityMcpBridge.Editor.Windows
             catch (Exception e)
             {
                 mcpClient.SetStatus(McpStatus.Error, e.Message);
+            }
+        }
+
+        /// <summary>
+        /// 更新服务器状态
+        /// </summary>
+        private void UpdateServerStatus()
+        {
+            try
+            {
+                // 初始化配置
+                if (serverConfig == null)
+                {
+                    serverConfig = ServerManagementSettings.GetConfig();
+                }
+
+                // 更新控制台管理器状态
+                isConsoleManagerRunning = ConsoleManagerService.IsConsoleManagerRunning();
+
+                // 更新服务器状态
+                currentServerStatus = ConsoleManagerService.GetServerStatus();
+            }
+            catch (Exception ex)
+            {
+                Debug.LogWarning($"更新服务器状态时出错: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// 启动控制台管理器
+        /// </summary>
+        private async Task StartConsoleManagerAsync()
+        {
+            try
+            {
+                var success = await UnityMcpBridge.StartConsoleManagerAsync();
+                if (success)
+                {
+                    Debug.Log("控制台管理器启动成功");
+                    UpdateServerStatus();
+                }
+                else
+                {
+                    Debug.LogError("控制台管理器启动失败");
+                }
+            }
+            catch (Exception ex)
+            {
+                Debug.LogError($"启动控制台管理器时出错: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// 停止控制台管理器
+        /// </summary>
+        private async Task StopConsoleManagerAsync()
+        {
+            try
+            {
+                var success = await UnityMcpBridge.StopConsoleManagerAsync();
+                if (success)
+                {
+                    Debug.Log("控制台管理器停止成功");
+                    UpdateServerStatus();
+                }
+                else
+                {
+                    Debug.LogError("控制台管理器停止失败");
+                }
+            }
+            catch (Exception ex)
+            {
+                Debug.LogError($"停止控制台管理器时出错: {ex.Message}");
             }
         }
     }

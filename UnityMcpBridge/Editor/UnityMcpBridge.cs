@@ -13,8 +13,10 @@ using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 using UnityEditor;
 using UnityEngine;
+using UnityMcpBridge.Editor.Data;
 using UnityMcpBridge.Editor.Helpers;
 using UnityMcpBridge.Editor.Models;
+using UnityMcpBridge.Editor.Services;
 using UnityMcpBridge.Editor.Tools;
 
 namespace UnityMcpBridge.Editor
@@ -33,6 +35,10 @@ namespace UnityMcpBridge.Editor
         private static readonly List<TcpClient> activeClients = new(); // 追踪活跃连接
         private static readonly string pidFilePath = Path.Combine(Application.temporaryCachePath, "unity_mcp_bridge.pid"); // PID文件路径
         private static volatile bool isShuttingDown = false; // 关闭状态标志
+
+        // 服务器管理配置
+        private static ServerManagementConfig serverConfig;
+        private static ServerStatusInfo currentServerStatus;
 
         public static bool IsRunning => isRunning;
 
@@ -62,6 +68,9 @@ namespace UnityMcpBridge.Editor
             AppDomain.CurrentDomain.ProcessExit += OnProcessExit;
             AppDomain.CurrentDomain.DomainUnload += OnDomainUnload;
 
+            // 初始化服务器管理配置
+            InitializeServerConfig();
+
             // 清理可能残留的PID文件和端口占用
             CleanupResidualResources();
 
@@ -85,6 +94,13 @@ namespace UnityMcpBridge.Editor
             {
                 return;
             }
+
+            // 检查并启动服务器
+            // if (serverConfig.autoStartOnUnityLaunch)
+            // {
+            //     _ = CheckAndStartServerAsync();
+            // }
+            // 【临时禁用自动启动mcpserver，仅保留状态查询】
 
             // 尝试启动监听器，如果端口被占用则尝试解决
             const int maxRetries = 3;
@@ -822,6 +838,193 @@ namespace UnityMcpBridge.Editor
             }
 
             return processIds;
+        }
+
+        /// <summary>
+        /// 初始化服务器管理配置
+        /// </summary>
+        private static void InitializeServerConfig()
+        {
+            serverConfig = ServerManagementSettings.GetConfig();
+            currentServerStatus = new ServerStatusInfo();
+        }
+
+        /// <summary>
+        /// 检查并启动服务器
+        /// </summary>
+        private static async Task CheckAndStartServerAsync()
+        {
+            try
+            {
+                Debug.Log("检查服务器状态...");
+
+                // 更新服务器状态
+                currentServerStatus = ConsoleManagerService.GetServerStatus();
+
+                // 根据启动模式决定启动策略
+                switch (serverConfig.startupMode)
+                {
+                    case ServerStartupMode.Auto:
+                        await StartServerWithAutoModeAsync();
+                        break;
+                    case ServerStartupMode.ConsoleManager:
+                        await StartServerWithConsoleManagerAsync();
+                        break;
+                    case ServerStartupMode.PythonDirect:
+                        // Python直接启动模式，不需要额外处理
+                        Debug.Log("使用Python直接启动模式");
+                        break;
+                }
+            }
+            catch (Exception ex)
+            {
+                Debug.LogError($"检查并启动服务器时出错: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// 自动模式启动服务器
+        /// </summary>
+        private static async Task StartServerWithAutoModeAsync()
+        {
+            Debug.Log("使用自动模式启动服务器");
+
+            // 首先检查控制台管理器是否可用
+            if (ConsoleManagerService.IsConsoleManagerRunning())
+            {
+                Debug.Log("控制台管理器已在运行，使用控制台管理器模式");
+                await StartServerWithConsoleManagerAsync();
+            }
+            else
+            {
+                Debug.Log("控制台管理器未运行，尝试启动控制台管理器");
+                var success = await ConsoleManagerService.StartConsoleManagerAsync(serverConfig);
+                if (success)
+                {
+                    await StartServerWithConsoleManagerAsync();
+                }
+                else
+                {
+                    Debug.LogWarning("控制台管理器启动失败，使用Python直接启动模式");
+                    // 回退到Python直接启动模式
+                }
+            }
+        }
+
+        /// <summary>
+        /// 递归查找Packages目录下所有包的UnityMcpManager~子目录，返回其绝对路径
+        /// </summary>
+        private static string FindUnityMcpManagerPath()
+        {
+            try
+            {
+                // 获取工程根目录（Assets的上一级）
+                string assetsPath = Application.dataPath;
+                string projectRoot = Directory.GetParent(assetsPath).FullName;
+                string packagesRoot = Path.Combine(projectRoot, "Packages");
+                if (!Directory.Exists(packagesRoot))
+                {
+                    Debug.LogError($"Packages目录不存在: {packagesRoot}");
+                    return null;
+                }
+                // 遍历Packages下所有包子目录
+                foreach (var packageDir in Directory.GetDirectories(packagesRoot))
+                {
+                    string mcpManagerDir = Path.Combine(packageDir, "UnityMcpManager~");
+                    if (Directory.Exists(mcpManagerDir))
+                    {
+                        // 检查可执行文件（兼容Win/Mac/Linux）
+                        string exeName = "start.bat";
+                        string exePath = Path.Combine(mcpManagerDir, exeName);
+                        if (File.Exists(exePath))
+                        {
+                            return mcpManagerDir;
+                        }
+                        // Mac/Linux兼容（无扩展名）
+                        string unixExePath = Path.Combine(mcpManagerDir, "UnityMcpManager");
+                        if (File.Exists(unixExePath))
+                        {
+                            return mcpManagerDir;
+                        }
+                    }
+                }
+                Debug.LogError("未在Packages下任何包中找到UnityMcpManager~目录及可执行文件");
+                return null;
+            }
+            catch (Exception ex)
+            {
+                Debug.LogError($"查找UnityMcpManager路径时出错: {ex.Message}");
+                return null;
+            }
+        }
+
+        /// <summary>
+        /// 使用控制台管理器启动服务器
+        /// </summary>
+        private static async Task StartServerWithConsoleManagerAsync()
+        {
+            Debug.Log("使用控制台管理器启动服务器");
+
+            // 查找UnityMcpManager~目录
+            string mcpManagerDir = FindUnityMcpManagerPath();
+            if (string.IsNullOrEmpty(mcpManagerDir))
+            {
+                Debug.LogError("无法找到UnityMcpManager~目录，服务器启动中止");
+                return;
+            }
+
+            // 确保控制台管理器正在运行
+            if (!ConsoleManagerService.IsConsoleManagerRunning())
+            {
+                // 传递工作目录参数给控制台管理器启动方法（如有需要可扩展参数）
+                var success = await ConsoleManagerService.StartConsoleManagerAsync(serverConfig, mcpManagerDir);
+                if (!success)
+                {
+                    Debug.LogError("无法启动控制台管理器");
+                    return;
+                }
+            }
+
+            // 等待一段时间让控制台管理器完全启动
+            await Task.Delay(2000);
+
+            // 检查服务器健康状态
+            var isHealthy = await ConsoleManagerService.CheckServerHealthAsync();
+            if (isHealthy)
+            {
+                Debug.Log("服务器已健康运行");
+            }
+            else
+            {
+                Debug.LogWarning("服务器健康检查失败");
+            }
+        }
+
+        /// <summary>
+        /// 获取当前服务器状态
+        /// </summary>
+        /// <returns>服务器状态信息</returns>
+        public static ServerStatusInfo GetCurrentServerStatus()
+        {
+            return currentServerStatus;
+        }
+
+        /// <summary>
+        /// 手动启动控制台管理器
+        /// </summary>
+        /// <returns>是否启动成功</returns>
+        public static async Task<bool> StartConsoleManagerAsync()
+        {
+            return await ConsoleManagerService.StartConsoleManagerAsync(serverConfig);
+        }
+
+        /// <summary>
+        /// 手动停止控制台管理器
+        /// </summary>
+        /// <returns>是否停止成功</returns>
+        public static async Task<bool> StopConsoleManagerAsync()
+        {
+            return await ConsoleManagerService.StopConsoleManagerAsync();
         }
     }
 }

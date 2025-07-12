@@ -34,12 +34,19 @@ Unity MCP acts as a bridge, allowing AI assistants (like Claude, Cursor) to inte
 
 ## How It Works 🤔
 
-Unity MCP connects your tools using two components:
+Unity MCP connects your tools using three components:
 
 1. **Unity MCP Bridge:** A Unity package running inside the Editor. (Installed via Package Manager).
 2. **Unity MCP Server:** A Python server that runs locally, communicating between the Unity Bridge and your MCP Client. (Installed manually).
+3. **Unity MCP Manager:** An optional C# console application that manages the Python server for better stability and port management.
 
 **Flow:** `[Your LLM via MCP Client] <-> [Unity MCP Server (Python)] <-> [Unity MCP Bridge (Unity Editor)]`
+
+**Server Management Options:**
+
+* **Auto Mode (Default):** Automatically detects and uses the console manager if available, falls back to direct Python server.
+* **Console Manager Mode:** Uses the C# console application to manage the Python server with enhanced features.
+* **Python Direct Mode:** Directly starts the Python server without the console manager.
 
 ---
 
@@ -176,11 +183,26 @@ If Auto-Configure fails or you use a different client:
 
 1. **Open your Unity Project.** The Unity MCP Bridge (package) should connect automatically. Check status via Window > Unity MCP.
 
-2. **Start your MCP Client** (Claude, Cursor, etc.). It should automatically launch the Unity MCP Server (Python) using the configuration from Installation Step 3.
+2. **Configure Server Management (Optional):** In the Unity MCP window, you can choose between different server startup modes:
+   * **Auto Mode (Recommended):** Automatically manages server startup
+   * **Console Manager Mode:** Uses the C# console application for enhanced management
+   * **Python Direct Mode:** Direct Python server startup
 
-3. **Interact!** Unity tools should now be available in your MCP Client.
+3. **Start your MCP Client** (Claude, Cursor, etc.). It should automatically launch the Unity MCP Server (Python) using the configuration from Installation Step 3.
+
+4. **Interact!** Unity tools should now be available in your MCP Client.
 
     Example Prompt: `Create a 3D player controller.`
+
+### Server Management Features
+
+The Unity MCP system now includes enhanced server management capabilities:
+
+* **Automatic Server Detection:** Detects if the console manager is running and uses it automatically
+* **Port Conflict Resolution:** Automatically handles port conflicts and allocates available ports
+* **Health Monitoring:** Continuous health checks to ensure server stability
+* **Process Management:** Proper startup and shutdown of server processes
+* **Status Monitoring:** Real-time status display in the Unity MCP window
 
 ---
 

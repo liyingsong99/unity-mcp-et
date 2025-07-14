@@ -33,6 +33,9 @@ def register_manage_asset_tools(mcp: FastMCP):
             path: Asset path (e.g., "Materials/MyMaterial.mat") or search scope.
             asset_type: Asset type (e.g., 'Material', 'Folder') - required for 'create'.
             properties: Dictionary of properties for 'create'/'modify'.
+                example properties for Material: {"color": [1, 0, 0, 1], "shader": "Standard"}.
+                example properties for Texture: {"width": 1024, "height": 1024, "format": "RGBA32"}.
+                example properties for PhysicsMaterial: {"bounciness": 1.0, "staticFriction": 0.5, "dynamicFriction": 0.5}.
             destination: Target path for 'duplicate'/'move'.
             search_pattern: Search pattern (e.g., '*.prefab').
             filter_*: Filters for search (type, date).
